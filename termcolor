@@ -1,6 +1,7 @@
 #!/bin/bash
 
 xterm_color() {
+  local escrgb red green blue x y z oldstty
   exec 3<> /dev/tty
   oldstty=$(stty -g <&3)
   stty raw -echo min 0 <&3
@@ -8,11 +9,13 @@ xterm_color() {
   stty "${oldstty}" <&3
   exec 3>&-
   if [[ "${escrgb}" == $'\033]11;rgb' ]]; then
-    # Each of red, green, and blue are 1, 2, or 4 hexadecimal digits and they
-    # may not even be the same length. If red is a single digit, then it
-    # represents the value R = red/15. If it is two digits, then it represents the
-    # value R = red/255 and if it's four digits, then it represents R =
-    # red/65535. In all cases, we have R in [0, 1]. Green and blue are similar.
+    # Each of red, green, and blue are 1, 2, 3, or 4 hexadecimal digits and they
+    # may not even be the same length.
+    # - If red is a single digit, then it represents the value R = red/15.
+    # - If it is two digits, then it represents the value R = red/255.
+    # - If it is three digits, then it represents the value R = red/4095.
+    # - If it is four digits, then it represents the value R = red/65535.
+    # In all cases, we have R in [0, 1]. Green and blue are similar.
     # If (R + G + B) / 3 < .5, then we say the background is dark, otherwise it
     # is light.
     #
@@ -21,22 +24,27 @@ xterm_color() {
     #   R = red / x,
     #   G = green / y, and
     #   B = blue / z.
-    # Note that x, y, and z are integers in {15, 255, 65535}.
+    # Note that x, y, and z are integers in {15, 255, 4095, 65535}.
+    #
+    # The LCM of 15, 255, 4095, and 65535 is 17891055.
     #
     # We can rewrite (R + G + B) / 3 < .5 as
-    #   2 * (R + G + B) < 3
-    #   2 * (R + G + B) * 65535 < 3 * 65535
-    #   2 * (red*(65535/x) + green*(65535/y) + blue*(65535/z) < 3 * 65535
+    #   2*(R + G + B) < 3
+    #   2*(R + G + B) * 17891055 < 3*17891055
+    #   2*(red*(17891055/x)+green*(17891055/y)+blue*(17891055/z) < 3*17891055
     #
-    # Conveniently, 65535/15, 65535/255, and 65535/65535 are all integers.
+    # By construction, 17891055/15, 17891055/255, 17891055/4095, and
+    # 17891055/65535 are all integers. Furthermore, all are less than 26 bits
+    # so both sides of that inequality comfortably fit within a 32-bit signed
+    # long, which is what Bash uses for integers.
     #
     # We can compute x, y, and z by the length of red, green, and blue.
     (( x = (1 << 4*${#red}) - 1 ))
     (( y = (1 << 4*${#green}) - 1 ))
     (( z = (1 << 4*${#blue}) - 1 ))
-    if (( 2 * ("0x${red}"   * (65535/x) + \
-               "0x${green}" * (65535/y) + \
-               "0x${blue}"  * (65535/z) ) < 196605 )); then
+    if (( ("0x${red}"   * (35782110/x) + \
+           "0x${green}" * (35782110/y) + \
+           "0x${blue}"  * (35782110/z) ) < 53673165 )); then
       echo 'dark'
     else
       echo 'light'
